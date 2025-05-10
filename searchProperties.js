@@ -102,7 +102,7 @@ export async function searchProperties(userPrompt) {
   const queryEmbedding = await getEmbedding(userPrompt);
 
   const { data, error } = await supabase.rpc('match_properties', {
-    match_count: 2,
+    match_count: 3,
     match_threshold: 0.8,
     max_price: intentData.filters.max_prijs || null,
     min_baths: intentData.filters.min_badkamers || 1,

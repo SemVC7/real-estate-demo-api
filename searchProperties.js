@@ -142,7 +142,7 @@ export async function searchProperties(userPrompt) {
   // Vertalen resultaten
   const results = await Promise.all(
     data.map(async (item) => {
-      //const beschrijving = await translateText(item.description, intentData.taal);
+      const beschrijving = await translateText(item.description, intentData.taal);
       const features = item.features && item.features.length > 0
         ? await translateText(item.features.join(', '), intentData.taal)
         : '';
@@ -156,17 +156,13 @@ export async function searchProperties(userPrompt) {
         zwembad: item.pool === 1 ? 'Ja' : 'Nee',
         woonoppervlakte: item.built_area,
         url: item.url_en,
-        beschrijving: item.description,
+        beschrijving: beschrijving,
         features: features,
         afbeelding: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
       };
     })
   );
 
-  const whatsappMessage = formatWhatsAppMessage(results);
-  return { type: 'properties', results, whatsappMessage };
+  const message = formatWhatsAppMessage(results);
+  return { type: 'properties', results, message };
 }
-
-// Voorbeeld:
-// const userInput = 'Ik ben op zoek naar een appartement met 2 slaapkamers in alicante.';
-// searchProperties(userInput);

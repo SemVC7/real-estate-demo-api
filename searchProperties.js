@@ -11,7 +11,7 @@ async function detectIntent(userPrompt) {
 Je bent een slimme intentiedetector. Geef dit JSON-formaat terug:
 {
   "taal": "nl" of "en" of "de" of "es" of "fr" of "it" of "pt" of "ru" of "no",
-  "intentie": "duurste", "goedkoopste" of "specifiek",
+  "intentie": "algemene vraag" of "vastgoedzoekopdracht",
   "filters": {
     "min_slaapkamers": getal of null,
     "min_badkamers": getal of null,
@@ -39,6 +39,24 @@ User prompt:
   return JSON.parse(jsonString);
 }
 
+// ✅ Formatter functie voor WhatsApp bericht
+function formatWhatsAppMessage(results) {
+  let message = `We hebben ${results.length} panden gevonden die je wellicht leuk zal vinden:\n\n`;
+
+  results.forEach((item) => {
+    message += `🏡 ${item.ref}\n`;
+    message += `🏡 ${item.locatie}\n`;
+    message += `💰 ${item.prijs}\n`;
+    message += `🛌 ${item.slaapkamers} | 🛁 ${item.badkamers} | 🏊 ${item.zwembad}\n`;
+    message += `📸 ${item.afbeelding}\n`;
+    message += `✨ ${item.beschrijving}\n`;
+    message += `🔗 ${item.url}\n`;
+    message += `\n-------------------------\n\n`;
+  });
+
+  return message;
+}
+
 // Ophalen embedding van de userprompt
 async function getEmbedding(text) {
   const embeddingResponse = await openai.embeddings.create({
@@ -62,15 +80,45 @@ async function translateText(text, targetLanguage) {
   return completion.choices[0].message.content.trim();
 }
 
+async function callAssistant(userPrompt) {
+  const thread = await openai.beta.threads.create();
+
+  await openai.beta.threads.messages.create(thread.id, {
+    role: 'user',
+    content: userPrompt,
+  });
+
+  const run = await openai.beta.threads.runs.create(thread.id, {
+    assistant_id:'asst_L4uKbR2GpJ3zhBmjKTxTrk1Q',
+  });
+
+  let runStatus;
+  do {
+    runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    if (runStatus.status !== 'completed') {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  } while (runStatus.status !== 'completed');
+
+  const messages = await openai.beta.threads.messages.list(thread.id);
+
+  const assistantMessage = messages.data.find(
+    (msg) => msg.role === 'assistant'
+  );
+  console.log(assistantMessage?.content[0]?.text?.value);
+  return assistantMessage?.content[0]?.text?.value || 'Sorry, ik heb geen antwoord kunnen genereren.';
+}
+
 // Main search functie
 export async function searchProperties(userPrompt) {
   const intentData = await detectIntent(userPrompt);
   console.log('🎯 Intentiedetectie:', intentData);
 
-  if (intentData.intentie !== 'specifiek') {
+  if (intentData.intentie !== 'vastgoedzoekopdracht') {
+    const assistantResponse = await callAssistant(userPrompt);
     return {
       type: 'agent',
-      message: 'Ik beantwoord dit rechtstreeks met de AI-agent prompt.',
+      message: assistantResponse,
     };
   }
 
@@ -94,7 +142,7 @@ export async function searchProperties(userPrompt) {
   // Vertalen resultaten
   const results = await Promise.all(
     data.map(async (item) => {
-      const beschrijving = await translateText(item.description, intentData.taal);
+      //const beschrijving = await translateText(item.description, intentData.taal);
       const features = item.features && item.features.length > 0
         ? await translateText(item.features.join(', '), intentData.taal)
         : '';
@@ -108,31 +156,17 @@ export async function searchProperties(userPrompt) {
         zwembad: item.pool === 1 ? 'Ja' : 'Nee',
         woonoppervlakte: item.built_area,
         url: item.url_en,
-        beschrijving: beschrijving,
+        beschrijving: item.description,
         features: features,
         afbeelding: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
       };
     })
   );
 
-  results.forEach((property, index) => {
-    console.log(`\n🏠 Resultaat ${index + 1}`);
-    console.log(`Ref: ${property.ref}`);
-    console.log(`URL: ${property.url}`);
-    console.log(`Prijs: ${property.prijs}`);
-    console.log(`Locatie: ${property.locatie}`);
-    console.log(`Slaapkamers: ${property.slaapkamers}`);
-    console.log(`Badkamers: ${property.badkamers}`);
-    console.log(`Woonoppervlakte: ${property.woonoppervlakte}`);
-    console.log(`Zwembad: ${property.zwembad}`);
-    console.log(`Beschrijving: ${property.beschrijving}`);
-    console.log(`Kenmerken: ${property.features}`);
-    console.log(`Afbeelding: ${property.afbeelding}\n`);
-  });
-
-  return { type: 'properties', results };
+  const whatsappMessage = formatWhatsAppMessage(results);
+  return { type: 'properties', results, whatsappMessage };
 }
 
 // Voorbeeld:
-// const userInput = 'Je recherche une appartement à Alicante, le budget est de 175000 et je veux 2 chambres';
+// const userInput = 'Ik ben op zoek naar een appartement met 2 slaapkamers in alicante.';
 // searchProperties(userInput);

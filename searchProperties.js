@@ -39,22 +39,7 @@ User prompt:
   return JSON.parse(jsonString);
 }
 
-// Samenvatten beschrijving
-async function summarizeText(text, targetLanguage) {
-  if (!text) return '';
-  const prompt = `
-Vat onderstaande vastgoedbeschrijving en kenmerken samen in maximaal 8 nette zinnen in de taal${targetLanguage}, zonder rare tekens:
-"${text}"
-`;
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [{ role: 'system', content: prompt }],
-    temperature: 0.5,
-  });
-  return completion.choices[0].message.content.trim();
-}
-
-// Ophalen embedding
+// Ophalen embedding van de userprompt
 async function getEmbedding(text) {
   const embeddingResponse = await openai.embeddings.create({
     model: 'text-embedding-ada-002',
@@ -63,35 +48,16 @@ async function getEmbedding(text) {
   return embeddingResponse.data[0].embedding;
 }
 
-// Vertalen tekst
-async function translateText(text, targetLanguage) {
+// Vertalen en samenvatten tekst
+async function summarizeAndTranslate(text, targetLanguage) {
   if (!text) return '';
+  const prompt = `Vat de volgende tekst samen in maximaal 4 zinnen en vertaal het naar ${targetLanguage}: ${text}`;
   const completion = await openai.chat.completions.create({
     model: 'gpt-4',
-    messages: [
-      { role: 'system', content: `Vertaal de volgende tekst naar ${targetLanguage}:` },
-      { role: 'user', content: text },
-    ],
+    messages: [{ role: 'user', content: prompt }],
     temperature: 0,
   });
   return completion.choices[0].message.content.trim();
-}
-
-// Formatter voor WhatsApp-bericht
-function formatWhatsAppMessage(results) {
-  let message = `We hebben ${results.length} panden gevonden die je wellicht leuk zal vinden:\n\n`;
-
-  results.forEach((item) => {
-    message += `🏡 ${item.ref}\n`;
-    message += `📍 ${item.locatie}\n`;
-    message += `💰 ${item.prijs}\n`;
-    message += `🛌 ${item.slaapkamers} | 🛁 ${item.badkamers} | 🏊 ${item.zwembad}\n`;
-    message += `✨ ${item.summary}\n`;
-    message += `🔗 ${item.url}\n`;
-    message += `\n-------------------------\n\n`;
-  });
-
-  return message;
 }
 
 async function callAssistant(userPrompt) {
@@ -116,9 +82,7 @@ async function callAssistant(userPrompt) {
 
   const messages = await openai.beta.threads.messages.list(thread.id);
 
-  const assistantMessage = messages.data.find(
-    (msg) => msg.role === 'assistant'
-  );
+  const assistantMessage = messages.data.find((msg) => msg.role === 'assistant');
   return assistantMessage?.content[0]?.text?.value || 'Sorry, ik heb geen antwoord kunnen genereren.';
 }
 
@@ -152,33 +116,17 @@ export async function searchProperties(userPrompt) {
     return { type: 'error', message: 'Er ging iets fout bij het ophalen van de panden.' };
   }
 
-  // Verrijk en vat samen
-  const results = await Promise.all(
-    data.map(async (item) => {
-      //const beschrijving = await translateText(item.description, intentData.taal);
-      //const features = item.features && item.features.length > 0
-      //  ? await translateText(item.features.join(', '), intentData.taal)
-      //  : '';
+  // Per pand een berichtobject maken
+const message = await Promise.all(
+  data.map(async (item) => {
+    const beschrijving = await summarizeAndTranslate(item.description, intentData.taal);
+    const caption = `🏡 ${item.ref}\n📍 ${item.town}, ${item.province}, ${item.country}\n💰 ${item.price} ${item.currency}\n🛌 ${item.beds} | 🛁 ${item.baths} | 🏊 ${item.pool === 1 ? 'Ja' : 'Nee'}\n✨ ${beschrijving}\n🔗 ${item.url_en}`;
+    return {
+      caption,
+      imageUrl: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
+    };
+  })
+);
 
-      const features = item.features && item.features.length > 0 ? item.features.join(', ') : '';
-      const summary = await summarizeText(`${item.description}\n${features}`, intentData.taal);
-
-      return {
-        ref: item.ref,
-        prijs: `${item.price} ${item.currency}`,
-        locatie: `${item.town}, ${item.province}, ${item.country}`,
-        slaapkamers: item.beds,
-        badkamers: item.baths,
-        zwembad: item.pool === 1 ? 'Ja' : 'Nee',
-        woonoppervlakte: item.built_area,
-        url: item.url_en,
-        summary: summary,
-        afbeelding: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
-      };
-    })
-  );
-
-  const message = formatWhatsAppMessage(results);
-
-  return { type: 'properties', results, message };
+  return { type: 'properties', message };
 }

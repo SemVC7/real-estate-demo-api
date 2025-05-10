@@ -134,5 +134,5 @@ export async function searchProperties(userPrompt) {
 }
 
 // Voorbeeld:
-const userInput = 'Je recherche une appartement à Alicante, le budget est de 175000 et je veux 2 chambres';
-searchProperties(userInput);
+// const userInput = 'Je recherche une appartement à Alicante, le budget est de 175000 et je veux 2 chambres';
+// searchProperties(userInput);

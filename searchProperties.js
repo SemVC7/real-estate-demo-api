@@ -39,25 +39,22 @@ User prompt:
   return JSON.parse(jsonString);
 }
 
-// ✅ Formatter functie voor WhatsApp bericht
-function formatWhatsAppMessage(results) {
-  let message = `We hebben ${results.length} panden gevonden die je wellicht leuk zal vinden:\n\n`;
-
-  results.forEach((item) => {
-    message += `🏡 ${item.ref}\n`;
-    message += `🏡 ${item.locatie}\n`;
-    message += `💰 ${item.prijs}\n`;
-    message += `🛌 ${item.slaapkamers} | 🛁 ${item.badkamers} | 🏊 ${item.zwembad}\n`;
-    message += `📸 ${item.afbeelding}\n`;
-    message += `✨ ${item.beschrijving}\n`;
-    message += `🔗 ${item.url}\n`;
-    message += `\n-------------------------\n\n`;
+// Samenvatten beschrijving
+async function summarizeText(text, targetLanguage) {
+  if (!text) return '';
+  const prompt = `
+Vat onderstaande vastgoedbeschrijving en kenmerken samen in maximaal 8 nette zinnen in de taal${targetLanguage}, zonder rare tekens:
+"${text}"
+`;
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4',
+    messages: [{ role: 'system', content: prompt }],
+    temperature: 0.5,
   });
-
-  return message;
+  return completion.choices[0].message.content.trim();
 }
 
-// Ophalen embedding van de userprompt
+// Ophalen embedding
 async function getEmbedding(text) {
   const embeddingResponse = await openai.embeddings.create({
     model: 'text-embedding-ada-002',
@@ -80,6 +77,23 @@ async function translateText(text, targetLanguage) {
   return completion.choices[0].message.content.trim();
 }
 
+// Formatter voor WhatsApp-bericht
+function formatWhatsAppMessage(results) {
+  let message = `We hebben ${results.length} panden gevonden die je wellicht leuk zal vinden:\n\n`;
+
+  results.forEach((item) => {
+    message += `🏡 ${item.ref}\n`;
+    message += `📍 ${item.locatie}\n`;
+    message += `💰 ${item.prijs}\n`;
+    message += `🛌 ${item.slaapkamers} | 🛁 ${item.badkamers} | 🏊 ${item.zwembad}\n`;
+    message += `✨ ${item.summary}\n`;
+    message += `🔗 ${item.url}\n`;
+    message += `\n-------------------------\n\n`;
+  });
+
+  return message;
+}
+
 async function callAssistant(userPrompt) {
   const thread = await openai.beta.threads.create();
 
@@ -89,7 +103,7 @@ async function callAssistant(userPrompt) {
   });
 
   const run = await openai.beta.threads.runs.create(thread.id, {
-    assistant_id:'asst_L4uKbR2GpJ3zhBmjKTxTrk1Q',
+    assistant_id: 'asst_L4uKbR2GpJ3zhBmjKTxTrk1Q',
   });
 
   let runStatus;
@@ -105,7 +119,6 @@ async function callAssistant(userPrompt) {
   const assistantMessage = messages.data.find(
     (msg) => msg.role === 'assistant'
   );
-  console.log(assistantMessage?.content[0]?.text?.value);
   return assistantMessage?.content[0]?.text?.value || 'Sorry, ik heb geen antwoord kunnen genereren.';
 }
 
@@ -139,13 +152,16 @@ export async function searchProperties(userPrompt) {
     return { type: 'error', message: 'Er ging iets fout bij het ophalen van de panden.' };
   }
 
-  // Vertalen resultaten
+  // Verrijk en vat samen
   const results = await Promise.all(
     data.map(async (item) => {
-      const beschrijving = await translateText(item.description, intentData.taal);
-      const features = item.features && item.features.length > 0
-        ? await translateText(item.features.join(', '), intentData.taal)
-        : '';
+      //const beschrijving = await translateText(item.description, intentData.taal);
+      //const features = item.features && item.features.length > 0
+      //  ? await translateText(item.features.join(', '), intentData.taal)
+      //  : '';
+
+      const features = item.features && item.features.length > 0 ? item.features.join(', ') : '';
+      const summary = await summarizeText(`${item.description}\n${features}`, intentData.taal);
 
       return {
         ref: item.ref,
@@ -156,13 +172,13 @@ export async function searchProperties(userPrompt) {
         zwembad: item.pool === 1 ? 'Ja' : 'Nee',
         woonoppervlakte: item.built_area,
         url: item.url_en,
-        beschrijving: beschrijving,
-        features: features,
+        summary: summary,
         afbeelding: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
       };
     })
   );
 
   const message = formatWhatsAppMessage(results);
+
   return { type: 'properties', results, message };
 }

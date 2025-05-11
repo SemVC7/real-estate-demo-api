@@ -145,6 +145,7 @@ export async function searchProperties(userPrompt) {
         return {
           caption,
           imageUrl: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
+          buttonId: `appointment_${item.ref}`,
         };
       })
     );

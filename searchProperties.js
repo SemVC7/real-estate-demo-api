@@ -7,6 +7,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 // Intentiedetectie
 async function detectIntent(userPrompt) {
+  if (!userPrompt || typeof userPrompt !== 'string') {
+    throw new Error('❌ [detectIntent] userPrompt is leeg of ongeldig.');
+  }
+
   const systemPrompt = `
 Je bent een slimme intentiedetector. Geef dit JSON-formaat terug:
 {
@@ -33,34 +37,55 @@ User prompt:
   });
 
   const answer = completion.choices[0].message.content;
+  if (!answer) throw new Error('❌ [detectIntent] Lege reactie van GPT.');
+
   const jsonStart = answer.indexOf('{');
   const jsonEnd = answer.lastIndexOf('}');
+  if (jsonStart === -1 || jsonEnd === -1) {
+    throw new Error('❌ [detectIntent] JSON-structuur niet gevonden in output.');
+  }
+
   const jsonString = answer.slice(jsonStart, jsonEnd + 1);
   return JSON.parse(jsonString);
 }
 
 // Ophalen embedding van de userprompt
 async function getEmbedding(text) {
-  const embeddingResponse = await openai.embeddings.create({
+  if (!text || typeof text !== 'string') {
+    throw new Error('❌ [getEmbedding] Ongeldige input.');
+  }
+
+  const response = await openai.embeddings.create({
     model: 'text-embedding-ada-002',
     input: text,
   });
-  return embeddingResponse.data[0].embedding;
+
+  return response.data[0]?.embedding;
 }
 
-// Vertalen en samenvatten tekst
+// Samenvatten en vertalen
 async function summarizeAndTranslate(text, targetLanguage) {
-  if (!text) return '';
-  const prompt = `Vat de volgende tekst samen in maximaal 4 zinnen en vertaal het naar ${targetLanguage}: ${text}`;
+  if (!text || !targetLanguage) {
+    console.warn('⚠ [summarizeAndTranslate] Ontbrekende tekst of doeltaal.');
+    return '';
+  }
+
+  const prompt = Vat de volgende tekst samen in maximaal 4 zinnen en vertaal het naar ${targetLanguage}: ${text};
   const completion = await openai.chat.completions.create({
     model: 'gpt-4',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
   });
-  return completion.choices[0].message.content.trim();
+
+  return completion.choices[0].message.content?.trim() || '';
 }
 
+// OpenAI Assistant als fallback
 async function callAssistant(userPrompt) {
+  if (!userPrompt || typeof userPrompt !== 'string') {
+    throw new Error('❌ [callAssistant] Ongeldige userPrompt.');
+  }
+
   const thread = await openai.beta.threads.create();
 
   await openai.beta.threads.messages.create(thread.id, {
@@ -76,57 +101,58 @@ async function callAssistant(userPrompt) {
   do {
     runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
     if (runStatus.status !== 'completed') {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
   } while (runStatus.status !== 'completed');
 
   const messages = await openai.beta.threads.messages.list(thread.id);
-
   const assistantMessage = messages.data.find((msg) => msg.role === 'assistant');
-  return assistantMessage?.content[0]?.text?.value || 'Sorry, ik heb geen antwoord kunnen genereren.';
+
+  return assistantMessage?.content?.[0]?.text?.value || 'Sorry, ik kon je vraag niet beantwoorden.';
 }
 
-// Main search functie
+// Hoofdfunctie
 export async function searchProperties(userPrompt) {
-  const intentData = await detectIntent(userPrompt);
-  console.log('🎯 Intentiedetectie:', intentData);
+  try {
+    const intentData = await detectIntent(userPrompt);
+    console.log('🎯 Intentiedetectie:', intentData);
 
-  if (intentData.intentie !== 'vastgoedzoekopdracht') {
-    const assistantResponse = await callAssistant(userPrompt);
-    return {
-      type: 'agent',
-      message: assistantResponse,
-    };
+    if (intentData.intentie !== 'vastgoedzoekopdracht') {
+      const fallback = await callAssistant(userPrompt);
+      return { type: 'agent', message: fallback };
+    }
+
+    const queryEmbedding = await getEmbedding(userPrompt);
+
+    const { data, error } = await supabase.rpc('match_properties', {
+      match_count: 3,
+      match_threshold: 0.8,
+      max_price: intentData.filters.max_prijs || 4000000,
+      min_baths: intentData.filters.min_badkamers || 1,
+      min_beds: intentData.filters.min_slaapkamers || 1,
+      pool_required: intentData.filters.zwembad || 0,
+      query_embedding: queryEmbedding,
+    });
+
+    if (error) {
+      throw new Error(❌ Supabase match_properties error: ${error.message});
+    }
+
+    const message = await Promise.all(
+      data.map(async (item) => {
+        const beschrijving = await summarizeAndTranslate(item.description, intentData.taal);
+        const caption = 🏡 ${item.ref}\n📍 ${item.town}, ${item.province}, ${item.country}\n💰 ${item.price} ${item.currency}\n🛌 ${item.beds} | 🛁 ${item.baths} | 🏊 ${item.pool === 1 ? 'Ja' : 'Nee'}\n✨ ${beschrijving}\n🔗 ${item.url_en};
+        return {
+          caption,
+          imageUrl: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
+        };
+      })
+    );
+
+    return { type: 'properties', message };
+
+  } catch (err) {
+    console.error('❌ [searchProperties] Fout:', err.message);
+    return { type: 'error', message: Er ging iets mis: ${err.message} };
   }
-
-  const queryEmbedding = await getEmbedding(userPrompt);
-
-  const { data, error } = await supabase.rpc('match_properties', {
-    match_count: 3,
-    match_threshold: 0.8,
-    max_price: intentData.filters.max_prijs || null,
-    min_baths: intentData.filters.min_badkamers || 1,
-    min_beds: intentData.filters.min_slaapkamers || 1,
-    pool_required: intentData.filters.zwembad || 0,
-    query_embedding: queryEmbedding,
-  });
-
-  if (error) {
-    console.error('❌ Fout bij ophalen van matches:', error);
-    return { type: 'error', message: 'Er ging iets fout bij het ophalen van de panden.' };
-  }
-
-  // Per pand een berichtobject maken
-const message = await Promise.all(
-  data.map(async (item) => {
-    const beschrijving = await summarizeAndTranslate(item.description, intentData.taal);
-    const caption = `🏡 ${item.ref}\n📍 ${item.town}, ${item.province}, ${item.country}\n💰 ${item.price} ${item.currency}\n🛌 ${item.beds} | 🛁 ${item.baths} | 🏊 ${item.pool === 1 ? 'Ja' : 'Nee'}\n✨ ${beschrijving}\n🔗 ${item.url_en}`;
-    return {
-      caption,
-      imageUrl: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
-    };
-  })
-);
-
-  return { type: 'properties', message };
 }

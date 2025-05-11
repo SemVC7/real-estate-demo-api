@@ -66,11 +66,11 @@ async function getEmbedding(text) {
 // Samenvatten en vertalen
 async function summarizeAndTranslate(text, targetLanguage) {
   if (!text || !targetLanguage) {
-    console.warn('⚠ [summarizeAndTranslate] Ontbrekende tekst of doeltaal.');
+    console.warn('⚠️ [summarizeAndTranslate] Ontbrekende tekst of doeltaal.');
     return '';
   }
 
-  const prompt = Vat de volgende tekst samen in maximaal 4 zinnen en vertaal het naar ${targetLanguage}: ${text};
+  const prompt = `Vat de volgende tekst samen in maximaal 4 zinnen en vertaal het naar ${targetLanguage}: ${text}`;
   const completion = await openai.chat.completions.create({
     model: 'gpt-4',
     messages: [{ role: 'user', content: prompt }],
@@ -127,7 +127,7 @@ export async function searchProperties(userPrompt) {
     const { data, error } = await supabase.rpc('match_properties', {
       match_count: 3,
       match_threshold: 0.8,
-      max_price: intentData.filters.max_prijs || 4000000,
+      max_price: intentData.filters.max_prijs || null,
       min_baths: intentData.filters.min_badkamers || 1,
       min_beds: intentData.filters.min_slaapkamers || 1,
       pool_required: intentData.filters.zwembad || 0,
@@ -135,13 +135,13 @@ export async function searchProperties(userPrompt) {
     });
 
     if (error) {
-      throw new Error(❌ Supabase match_properties error: ${error.message});
+      throw new Error(`❌ Supabase match_properties error: ${error.message}`);
     }
 
     const message = await Promise.all(
       data.map(async (item) => {
         const beschrijving = await summarizeAndTranslate(item.description, intentData.taal);
-        const caption = 🏡 ${item.ref}\n📍 ${item.town}, ${item.province}, ${item.country}\n💰 ${item.price} ${item.currency}\n🛌 ${item.beds} | 🛁 ${item.baths} | 🏊 ${item.pool === 1 ? 'Ja' : 'Nee'}\n✨ ${beschrijving}\n🔗 ${item.url_en};
+        const caption = `🏡 ${item.ref}\n📍 ${item.town}, ${item.province}, ${item.country}\n💰 ${item.price} ${item.currency}\n🛌 ${item.beds} | 🛁 ${item.baths} | 🏊 ${item.pool === 1 ? 'Ja' : 'Nee'}\n✨ ${beschrijving}\n🔗 ${item.url_en}`;
         return {
           caption,
           imageUrl: Array.isArray(item.image_url) ? item.image_url[0] : item.image_url,
@@ -153,6 +153,6 @@ export async function searchProperties(userPrompt) {
 
   } catch (err) {
     console.error('❌ [searchProperties] Fout:', err.message);
-    return { type: 'error', message: Er ging iets mis: ${err.message} };
+    return { type: 'error', message: `Er ging iets mis: ${err.message}` };
   }
 }

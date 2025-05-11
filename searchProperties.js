@@ -13,11 +13,11 @@ Je bent een slimme intentiedetector. Geef dit JSON-formaat terug:
   "taal": "nl" of "en" of "de" of "es" of "fr" of "it" of "pt" of "ru" of "no",
   "intentie": "algemene vraag" of "vastgoedzoekopdracht",
   "filters": {
-    "min_slaapkamers": getal of null,
-    "min_badkamers": getal of null,
-    "zwembad": getal of null,
-    "max_prijs": getal of null,
-    "locatie": tekst of null
+    "min_slaapkamers": getal of 1,
+    "min_badkamers": getal of 1,
+    "zwembad": getal of 0,
+    "max_prijs": getal of 4000000,
+    "locatie": tekst of Alicante
   }
 }
 Begrijp Nederlands, Engels, Duits, Spaans, Frans, Italiaans, Portugees, Russisch, Noors.
